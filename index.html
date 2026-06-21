@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grouped Harvesting Report — DEMO</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#0f172a">
+    <script>/* apply saved theme before first paint to avoid a light flash */
+        try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) { }</script>
+    <script>/* Global HTML-escape helper — used everywhere user/DB text is put into innerHTML.
+        Defined before any module so it is always available. Escapes the five characters
+        that matter for both element text and double-quoted attribute values. */
+        window.escapeHtml = function (s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        };</script>
+    <link rel="stylesheet" href="style.css?v=25">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <!-- ============================================================= -->
+    <!-- DEMO MODE: self-contained, localStorage-backed Firebase shim.  -->
+    <!-- The real Firebase CDN + Google Identity scripts are removed so -->
+    <!-- this build NEVER connects to the cloud and can't touch real    -->
+    <!-- plantation data. All figures below are invented for demo only. -->
+    <!-- ============================================================= -->
+    <script src="demo_firebase_mock.js"></script>
+    <script src="demo_seed.js"></script>
+    <style>/* leave room for the fixed DEMO ribbon at the very top */
+        #app-layout-main { padding-top: 26px; box-sizing: border-box; }
+    </style>
+</head>
+
+<body>
+    <!-- DEMO ribbon — always visible so this is never mistaken for live data -->
+    <div id="demo-ribbon" style="position:fixed; top:0; left:0; width:100%; z-index:100000; background:#b45309; color:#fff; font-family:Outfit,sans-serif; font-size:0.8rem; font-weight:600; text-align:center; padding:4px 8px; letter-spacing:0.03em; box-shadow:0 1px 4px rgba(0,0,0,0.25);">
+        🟠 DEMO — all figures are fictional sample data, stored only in this browser.
+        <button onclick="window.__demoReset && window.__demoReset()" style="margin-left:10px; background:rgba(255,255,255,0.2); color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:4px; padding:1px 8px; font-size:0.72rem; cursor:pointer;">Reset demo data</button>
+    </div>
+    <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-main); z-index:9999; display:none; flex-direction:column; align-items:center; justify-content:center;">
+        <div style="background:var(--bg-card); padding:2rem; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); text-align:center; width: 350px;">
+            <h2 style="margin-top:0;">Cloud Sync Login</h2>
+            <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:0.9rem;">Secure your app data across devices</p>
+            <input type="email" id="login-email" placeholder="Email" class="edit-input" style="width:100%; padding:0.75rem; border:1px solid var(--border-color); margin-bottom:1rem;" />
+            <input type="password" id="login-pass" placeholder="Password" class="edit-input" style="width:100%; padding:0.75rem; border:1px solid var(--border-color); margin-bottom:1rem;" />
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text-secondary); cursor:pointer;">
+                    <input type="checkbox" id="remember-me" style="width:14px; height:14px; cursor:pointer;" checked />
+                    Remember me (3 months)
+                </label>
+                <a href="#" id="btn-forgot-password" style="font-size:0.85rem; color:var(--accent); text-decoration:none;">Forgot Password?</a>
+            </div>
+            <button id="btn-login" class="btn-primary" style="width:100%; justify-content:center; padding:0.75rem; margin-bottom:0.5rem;">Login</button>
+            <p id="login-error" style="color:var(--danger); margin-top:1rem; min-height:1.5rem; font-size:0.9rem; margin-bottom:0;"></p>
+        </div>
+    </div>
+
+    <!-- Forgot Password Modal -->
+    <div id="forgot-pw-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000; justify-content:center; align-items:center;">
+        <div style="background:var(--bg-card); padding:2rem; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.2); width:360px; text-align:center;">
+            <h3 style="margin-top:0;">Reset Password</h3>
+            <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:1.5rem;">Enter your email address and we'll send you a password reset link.</p>
+            <input type="email" id="forgot-pw-email" placeholder="Email address" class="edit-input" style="width:100%; padding:0.75rem; border:1px solid var(--border-color); margin-bottom:1rem;" />
+            <div style="display:flex; gap:0.75rem; justify-content:center;">
+                <button id="btn-forgot-pw-cancel" class="btn-secondary" style="padding:0.6rem 1.5rem;">Cancel</button>
+                <button id="btn-forgot-pw-send" class="btn-primary" style="padding:0.6rem 1.5rem;">Send Reset Link</button>
+            </div>
+            <p id="forgot-pw-msg" style="margin-top:1rem; min-height:1.2rem; font-size:0.9rem;"></p>
+        </div>
+    </div>
+
+    <!-- First Login — Change Password Modal -->
+    <div id="first-login-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10001; justify-content:center; align-items:center;">
+        <div style="background:var(--bg-card); padding:2rem; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); width:380px; text-align:center;">
+            <div style="font-size:2.5rem; margin-bottom:0.75rem;">🔐</div>
+            <h3 style="margin-top:0;">Welcome! Please set your password</h3>
+            <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:1.5rem;">This is your first login. Please change your temporary password to something secure.</p>
+            <input type="password" id="new-pw-1" placeholder="New Password" class="edit-input" style="width:100%; padding:0.75rem; border:1px solid var(--border-color); margin-bottom:0.75rem;" />
+            <input type="password" id="new-pw-2" placeholder="Confirm New Password" class="edit-input" style="width:100%; padding:0.75rem; border:1px solid var(--border-color); margin-bottom:1rem;" />
+            <button id="btn-set-new-pw" class="btn-primary" style="width:100%; padding:0.75rem;">Set Password</button>
+            <p id="first-login-msg" style="margin-top:0.75rem; min-height:1.2rem; font-size:0.9rem; color:var(--danger);"></p>
+        </div>
+    </div>
+
+    
+    <div id="app-layout-main" class="app-layout" style="display:none;">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">🌴</div>
+                <h2>AntiGravity<small>Harvesting Report</small></h2>
+                <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="Collapse sidebar">«</button>
+            </div>
+            <nav class="sidebar-nav">
+                <ul class="nav-menu">
+                    <li class="nav-group-label">Overview</li>
+
+                    <li class="nav-item">
+                        <a href="#" id="sidebar-dashboard" class="nav-link">
+                            <span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-group-label">Planning</li>
+
+                    <li class="nav-item" data-menu-key="ffbBudget">
+                        <a href="#" id="sidebar-ffb-budget" class="nav-link">
+                            <span class="nav-icon">💰</span><span class="nav-label">FFB Budget Estimate</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" data-menu-key="planting">
+                        <a href="#" id="sidebar-planting" class="nav-link">
+                            <span class="nav-icon">📋</span><span class="nav-label">Planting Phase Record</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-group-label">Operations</li>
+
+                    <li class="nav-item">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">👥</span><span class="nav-label">Gang</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item" data-menu-key="gangs">
+                                <a href="#" id="sidebar-harvesting-gangs" class="nav-link">
+                                    <span class="nav-icon">🌴</span><span class="nav-label">Harvesting Gang</span>
+                                </a>
+                            </li>
+                            <li class="nav-item" data-menu-key="maintenance">
+                                <a href="#" id="sidebar-mnt-gangs" class="nav-link">
+                                    <span class="nav-icon">🔧</span><span class="nav-label">Maintenance Gang</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="performance">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">📈</span><span class="nav-label">Harvesting Performance</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-interval" class="nav-link"><span class="nav-label">Harvesting Interval</span></a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-perf" class="nav-link"><span class="nav-label">Harvester Performance Chart</span></a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-current-prev" class="nav-link"><span class="nav-label">Current vs Previous Month</span></a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-ytd" class="nav-link"><span class="nav-label">Harvesting YTD</span></a>
+                            </li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="ironhorse">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">🐴</span><span class="nav-label">Iron Horse</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-ironhorse-assets" class="nav-link">
+                                    <span class="nav-icon">🔧</span><span class="nav-label">Asset Numbers</span>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-ironhorse-expenses" class="nav-link">
+                                    <span class="nav-icon">💰</span><span class="nav-label">Expenses</span>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-ironhorse-costperha" class="nav-link">
+                                    <span class="nav-icon">📊</span><span class="nav-label">Cost per FFB MT</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="wages">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">💵</span><span class="nav-label">Rate of Wages</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-wages" class="nav-link">
+                                    <span class="nav-icon">🧮</span><span class="nav-label">Calculator</span>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-wages-ledger" class="nav-link">
+                                    <span class="nav-icon">📒</span><span class="nav-label">Wage Ledger</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="weekly">
+                        <a href="#" id="sidebar-weekly" class="nav-link">
+                            <span class="nav-icon">🗺️</span><span class="nav-label">Weekly Activity</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="rainfall">
+                        <a href="#" id="sidebar-rainfall" class="nav-link">
+                            <span class="nav-icon">🌧️</span><span class="nav-label">Rainfall Record</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-group-label">Maintenance</li>
+
+                    <li class="nav-item" data-menu-key="maintenance">
+                        <a href="#" id="sidebar-spraying" class="nav-link">
+                            <span class="nav-icon">🌱</span><span class="nav-label">Spraying Chemical Usage</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" data-menu-key="maintenance">
+                        <a href="#" id="sidebar-manuring" class="nav-link">
+                            <span class="nav-icon">🌿</span><span class="nav-label">Manuring Fertilizer Usage</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="maintenance">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">🌾</span><span class="nav-label">Field Maintenance</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-mnt-worklog" class="nav-link"><span class="nav-label">📝 Work Log</span></a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="#" id="sidebar-mnt-gantt" class="nav-link"><span class="nav-label">📊 Gantt Chart</span></a>
+                            </li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-group-label">System</li>
+
+                    <li class="nav-item" data-menu-key="reports">
+                        <div class="nav-item-header" id="sidebar-excel-reports">
+                            <span class="nav-icon">📊</span><span class="nav-label">Reports</span>
+                        </div>
+                    </li>
+                    <li class="nav-item" id="nav-audit-log-item" data-menu-key="auditLog" style="display:none;">
+                        <a href="#" id="sidebar-audit-log" class="nav-link">
+                            <span class="nav-icon">📋</span><span class="nav-label">Audit Log</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-item" data-menu-key="dataManagement">
+                        <div class="nav-item-header has-children">
+                            <span class="nav-icon">⚙️</span><span class="nav-label">Data Management</span>
+                            <span class="nav-chevron">▼</span>
+                        </div>
+                        <ul class="nav-submenu">
+                            <li class="nav-item">
+                                <div class="nav-item-header has-children">
+                                    <span class="nav-label">📄 Download Template</span>
+                                    <span class="nav-chevron">▼</span>
+                                </div>
+                                <ul class="nav-submenu">
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-download-template" class="nav-link"><span class="nav-label">Harvesting Interval Template</span></a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-download-ffb-template" class="nav-link"><span class="nav-label">FFB Budget Template</span></a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-download-spray-template" class="nav-link"><span class="nav-label">Spraying Maintenance Template</span></a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-download-manuring-template" class="nav-link"><span class="nav-label">Manuring Template</span></a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-download-ironhorse-template" class="nav-link"><span class="nav-label">Iron Horse Expenses Template</span></a>
+                                    </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item">
+                                <div class="nav-item-header has-children">
+                                    <span class="nav-label">📥 Import Excel</span>
+                                    <span class="nav-chevron">▼</span>
+                                </div>
+                                <ul class="nav-submenu">
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-excel" class="nav-link"><span class="nav-label">Harvesting Interval</span></a>
+                                        <input type="file" id="sidebar-import-input" accept=".xlsx, .xls" style="display: none;" />
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-ffb" class="nav-link"><span class="nav-label">FFB Budget</span></a>
+                                        <input type="file" id="sidebar-import-ffb-input" accept=".xlsx, .xls" style="display: none;" />
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-spray" class="nav-link"><span class="nav-label">Spraying Maintenance</span></a>
+                                        <input type="file" id="sidebar-import-spray-input" accept=".xlsx" style="display: none;" />
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-manuring" class="nav-link"><span class="nav-label">Manuring</span></a>
+                                        <input type="file" id="sidebar-import-manuring-input" accept=".xlsx" style="display: none;" />
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-ironhorse-expenses" class="nav-link"><span class="nav-label">Iron Horse Expenses</span></a>
+                                        <input type="file" id="sidebar-import-ironhorse-input" accept=".xlsx,.xls" style="display: none;" />
+                                    </li>
+                                </ul>
+                            </li>
+                            <li class="nav-item">
+                                <div class="nav-item-header has-children">
+                                    <span class="nav-label">💾 Backup &amp; Restore</span>
+                                    <span class="nav-chevron">▼</span>
+                                </div>
+                                <ul class="nav-submenu">
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-export-backup" class="nav-link"><span class="nav-label">Export Backup</span></a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-import-backup" class="nav-link"><span class="nav-label">Restore Backup</span></a>
+                                        <input type="file" id="sidebar-import-backup-input" accept=".json" style="display:none;" />
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="#" id="sidebar-backup-settings" class="nav-link"><span class="nav-label">Backup Settings</span></a>
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            </nav>
+            <div class="sidebar-right">
+                <div id="nav-user-mgmt-item" class="sidebar-right-item" style="display:none;">
+                    <a href="#" id="sidebar-user-mgmt" class="nav-link sidebar-right-link">
+                        <span class="nav-icon">👤</span><span class="nav-label">User Management</span>
+                    </a>
+                </div>
+                <div class="sidebar-right-item">
+                    <a href="#" id="sidebar-logout" class="nav-link sidebar-right-link" style="color:#fca5a5; font-weight:600;">
+                        <span class="nav-icon">🚪</span><span class="nav-label">Logout</span>
+                    </a>
+                </div>
+                <div class="sidebar-right-version">v1.7.2</div>
+            </div>
+        </aside>
+
+        <div class="app-container">
+            <header>
+                <div class="header-content">
+                    <div class="header-left" style="display:flex; align-items:center; gap:0.9rem;">
+                        <button id="global-back-btn" class="btn-secondary" style="display:none; padding:0.45rem 0.9rem; white-space:nowrap;" title="Go back to the previous view">← Back</button>
+                        <div>
+                            <h1>Harvesting Performance Dashboard</h1>
+                            <p class="subtitle">Interactive Grouped Blocks Report</p>
+                        </div>
+                    </div>
+                    <div class="header-right">
+                        <div id="header-user-info" style="display:none;align-items:center;gap:0.5rem;padding:0.35rem 0.75rem;border-radius:8px;background:var(--bg-card,#fff);border:1px solid var(--border-color);font-size:0.8rem;">
+                            <span style="font-size:1rem;">👤</span>
+                            <div style="display:flex;flex-direction:column;line-height:1.3;">
+                                <span id="header-user-email" style="font-weight:600;color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                                <span id="header-user-role" style="color:var(--text-secondary);font-size:0.73rem;text-transform:uppercase;letter-spacing:0.04em;"></span>
+                            </div>
+                        </div>
+                        <div class="stat-badge">
+                            <span class="stat-label">Total Selected</span>
+                            <span class="stat-value" id="header-grand-total">0.00 HA</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main>
+                <div id="dashboard-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1500px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS: Dashboard home (KPI cards + quick links) -->
+                </div>
+
+                <div id="main-report-wrapper" class="report-wrapper">
+                    <div class="toolbar">
+                        <div class="toolbar-left">
+                            <h2 id="table-title">Planting Phase (O/P) Breakdown</h2>
+                        </div>
+                        <div class="toolbar-right" style="display: flex; gap: 0.5rem; align-items: center;">
+                            <button id="delete-year-btn" class="btn-danger" title="Admin Only">
+                                <span>🗑️</span> Delete Year
+                            </button>
+                            <button id="add-block-btn" class="btn-primary">
+                                <span>➕</span> Add Block
+                            </button>
+                            <button id="save-main-btn" class="btn-primary"
+                                style="background-color: #10b981; border-color: #10b981;" title="Save all changes">
+                                <span>💾</span> Save
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="loading" class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading hierarchical data...</p>
+                    </div>
+
+                    <div class="table-container hidden" id="table-container">
+                        <table class="grouped-table" id="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-block">Block</th>
+                                    <th class="col-op" id="col-header-grouping">O/P</th>
+                                    <th class="col-ha">Total HA</th>
+                                    <th class="col-actions"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body">
+                                <!-- Rows generated by JS -->
+                            </tbody>
+                            <tfoot>
+                                <tr class="row-grand-total">
+                                    <td colspan="2" class="grand-total-label">All Blocks</td>
+                                    <td colspan="2" class="grand-total-value" id="table-grand-total">0.00</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="interval-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate individual gang interval components here -->
+                </div>
+
+                <div id="performance-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate individual gang performance components here -->
+                </div>
+
+                <div id="ytd-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate YTD report here -->
+                </div>
+
+                <div id="current-prev-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Current vs Previous Report here -->
+                </div>
+
+                <div id="ffb-budget-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate FFB Budget table here -->
+                </div>
+
+                <div id="rainfall-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Rainfall Record table here -->
+                </div>
+
+                <div id="spraying-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1400px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Spraying report here -->
+                </div>
+
+                <div id="manuring-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1500px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Manuring report here -->
+                </div>
+
+                <div id="ironhorse-assets-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1300px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Iron Horse Asset Numbers here -->
+                </div>
+
+                <div id="ironhorse-expenses-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Iron Horse Expenses here -->
+                </div>
+
+                <div id="ironhorse-costperha-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1400px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate Iron Horse Cost per Ha report here -->
+                </div>
+
+                <div id="weekly-activity-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1300px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate the Weekly Activity report here -->
+                </div>
+
+                <div id="wages-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1100px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate the Rate of Wages calculator here -->
+                </div>
+
+                <div id="wages-ledger-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1300px; padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <!-- JS will generate the Wage Ledger (detailed actuals import) here -->
+                </div>
+
+                <div id="maintenance-coming-soon-wrapper" class="report-wrapper hidden"
+                    style="max-width: 600px;">
+                    <!-- Coming Soon for Slashing / Pruning -->
+                </div>
+
+                <div id="gang-overview-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1100px;">
+                    <!-- JS: Harvesting Gangs overview -->
+                </div>
+
+                <div id="selector-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px;">
+                    <!-- JS: year/month selector landing page -->
+                </div>
+
+                <div id="maintenance-gangs-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1100px;">
+                    <!-- JS: Maintenance Gangs -->
+                </div>
+
+                <div id="maintenance-worklog-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1400px;">
+                    <!-- JS: Maintenance Work Log -->
+                </div>
+
+                <div id="maintenance-gantt-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1600px;">
+                    <!-- JS: Maintenance Gantt Chart -->
+                </div>
+
+                <div id="audit-log-wrapper" class="report-wrapper hidden"
+                    style="max-width: 1200px; padding:0; background:transparent; border:none; box-shadow:none;">
+                    <!-- JS will generate Audit Log panel here -->
+                </div>
+
+                <div id="user-mgmt-wrapper" class="report-wrapper hidden"
+                    style="max-width: 900px;">
+                    <!-- JS will generate User Management panel here -->
+                </div>
+
+                <div id="excel-reports-wrapper" class="report-wrapper hidden"
+                    style="max-width: 900px;">
+                    <!-- JS will generate Excel Reports panel here -->
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="templates.js"></script>
+    <script src="render_dashboard.js?v=13"></script>
+    <script src="ffbData.js"></script>
+    <script src="rainfallData.js"></script>
+    <script src="render_rainfall.js"></script>
+    <script src="render_ytd_report.js"></script>
+    <script src="render_current_vs_prev.js"></script>
+    <script src="render_audit.js?v=3"></script>
+    <script src="render_ironhorse.js?v=45"></script>
+    <script src="render_maintenance.js?v=9"></script>
+    <script src="render_weekly.js?v=22"></script>
+    <script src="render_wages.js?v=4"></script>
+    <script src="render_wages_ledger.js?v=4"></script>
+    <script src="render_spraying.js?v=14"></script>
+    <script src="render_manuring.js?v=13"></script>
+    <script src="render_reports.js?v=24"></script>
+    <script src="app_boot.js?v=1"></script>
+    <script src="app_user_mgmt.js?v=5"></script>
+    <script src="script.js?v=65"></script>
+    <script src="ui_enhancements.js?v=11"></script>
+    <!-- field_mode.js intentionally omitted in DEMO (it would lock phones to the empty Weekly view) -->
+    <script>
+        // Vertical sidebar accordion: expand/collapse groups. Clicking a header
+        // toggles its submenu and closes sibling groups at the same level. The
+        // menu stays open while navigating content (persistent left rail).
+        document.addEventListener('click', (e) => {
+            const header = e.target.closest('.nav-item-header.has-children');
+            if (!header) return;
+            e.preventDefault();
+
+            const wasOpen = header.classList.contains('open');
+
+            // Close sibling headers at the same nesting level (accordion).
+            const isTopLevel = header.parentElement
+                && header.parentElement.parentElement
+                && header.parentElement.parentElement.classList.contains('nav-menu')
+                && !header.parentElement.parentElement.classList.contains('nav-submenu');
+            if (isTopLevel) {
+                document.querySelectorAll('.nav-menu > .nav-item > .nav-item-header').forEach(h => {
+                    if (h !== header) h.classList.remove('open');
+                });
+            } else if (header.parentElement && header.parentElement.parentElement) {
+                header.parentElement.parentElement
+                    .querySelectorAll(':scope > .nav-item > .nav-item-header')
+                    .forEach(h => { if (h !== header) h.classList.remove('open'); });
+            }
+
+            header.classList.toggle('open', !wasOpen);
+        });
+
+        // Collapse / expand the whole sidebar to an icon rail.
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('#sidebar-collapse-btn');
+            if (!btn) return;
+            const layout = document.getElementById('app-layout-main');
+            const collapsed = layout.classList.toggle('sidebar-collapsed');
+            btn.textContent = collapsed ? '»' : '«';
+            btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+        });
+    </script>
+
+    <!-- Right-click context menu -->
+    <div id="nav-context-menu" style="display:none; position:fixed; z-index:99999; background:var(--bg-card); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); padding:4px 0; min-width:160px;">
+        <div id="nav-ctx-newtab" style="padding:8px 16px; cursor:pointer; font-size:0.9rem; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            <span>↗</span> Open in New Tab
+        </div>
+    </div>
+
+    <!-- Modals for FFB Budget actions -->
+    <div id="ffb-modal-overlay" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div class="modal-content"
+            style="background: white; padding: 2rem; border-radius: 8px; width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h3 id="ffb-modal-title" style="margin-top: 0; margin-bottom: 1rem;">Modal Title</h3>
+            <div id="ffb-modal-body" style="margin-bottom: 1.5rem;">
+                <!-- Content injected by JS -->
+            </div>
+            <div class="modal-actions" style="display: flex; justify-content: flex-end; gap: 1rem;">
+                <button id="ffb-modal-cancel" class="btn-secondary"
+                    style="background: #e2e8f0; color: #475569; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                <button id="ffb-modal-confirm" class="btn-primary" style="padding: 0.5rem 1rem;">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inactivity Warning Modal -->
+    <div id="idle-modal-overlay" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; justify-content: center; align-items: center;">
+        <div class="modal-content"
+            style="background: white; padding: 2rem; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
+            <h2 style="margin-top: 0; color: var(--danger);">Inactivity Warning</h2>
+            <p style="margin-bottom: 1.5rem; color: var(--text-secondary); line-height: 1.5;">You have been inactive for a while. For your security, you will be logged out in:</p>
+            <div id="idle-countdown" style="font-size: 2.5rem; font-weight: 700; color: var(--text-main); margin-bottom: 2rem;">30</div>
+            <button id="btn-stay-logged-in" class="btn-primary" style="width: 100%; padding: 1rem; font-size: 1.1rem;">I'm Still Here!</button>
+        </div>
+    </div>
+</body>
+
+</html>
