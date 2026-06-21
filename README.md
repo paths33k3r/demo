@@ -45,7 +45,13 @@ or host this folder on GitHub Pages / any static host.
 ## Known limitation
 
 The downloadable Excel **reports** (YTD / Rainfall / Spraying) are built from the
-templates in `Report samples/`, which may still carry the real company name baked
-into the spreadsheet itself. The on-screen experience is fully anonymised; only the
-generated `.xlsx` files inherit the template header. Replace those templates if you
-need fully anonymised downloads too.
+templates in `Report samples/`. These have been scrubbed of corporate identity —
+company name, registration number, estate name, document-author metadata, the
+threaded-comment author registry, and leaked local file paths are all replaced with
+neutral demo values.
+
+One thing is intentionally **not** anonymised: a few worksheet **tab names** in
+`Havesting Performance Dec 2025.xlsx` still carry real worker first-names (e.g.
+`DARSO GANG`). Those tabs are wired into formulas, defined names and charts, so
+renaming them safely needs Excel/LibreOffice to revalidate the links — out of scope
+for the text-only scrub. Rename them in Excel if you need fully anonymised tabs too.
